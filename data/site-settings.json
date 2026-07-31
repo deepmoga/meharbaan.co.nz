@@ -1,0 +1,46 @@
+{
+  "branding": {
+    "siteName": "Meharbaan Indian Cuisine",
+    "logo": "/meharbaan-logo.png",
+    "footerLogo": "/meharbaan-logo.png",
+    "favicon": "/meharbaan-logo.png"
+  },
+  "contact": {
+    "phone": "09 212 0007",
+    "email": "meharbaanindiancuisine@gmail.com",
+    "address": "154 Shirley Road, Papatoetoe, Auckland 2025",
+    "facebook": "https://www.facebook.com/profile.php?id=61585619636550",
+    "instagram": "https://www.instagram.com/meharbaanindiancuisine"
+  },
+  "mail": {
+    "enabled": true,
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "secure": false,
+    "username": "gagansngh966@gmail.com",
+    "password": "fryuugipuydynlmw",
+    "fromEmail": "gagansngh966@gmail.com",
+    "adminEmail": "rana33994@gmail.com"
+  },
+  "admin": {
+    "email": "rana33994@gmail.com",
+    "passwordHash": "d0e706eb1034891528dd8f415d0ffc5e:d611755e17141e814f540741a10811a30e41d042ddc464de099ab3037bedf9029cbbdd71fde77b98c294c05c3021d1c0881da27cc44b0c02867d46b5a12b34d2"
+  },
+  "stripe": {
+    "enabled": false,
+    "mode": "live",
+    "publishableKey": "",
+    "secretKey": "",
+    "testPublishableKey": "",
+    "testSecretKey": "",
+    "webhookSecret": "",
+    "currency": "nzd"
+  },
+  "recaptcha": {
+    "siteKey": "",
+    "secretKey": ""
+  },
+  "restaurant": {
+    "open": true
+  }
+}

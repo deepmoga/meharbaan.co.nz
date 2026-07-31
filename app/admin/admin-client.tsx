@@ -1,0 +1,1616 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Clock,
+  LayoutDashboard,
+  LogOut,
+  PackagePlus,
+  Settings,
+  ShoppingBag,
+  Tags,
+  Truck
+} from "lucide-react";
+import type { MenuProduct, MenuStore, SizeOption } from "@/lib/menu-types";
+import type { SiteSettings } from "@/lib/site-settings";
+
+const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const sections = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "orders", label: "Orders", icon: ShoppingBag },
+  { id: "categories", label: "Categories", icon: Tags },
+  { id: "products", label: "Products", icon: PackagePlus },
+  { id: "delivery", label: "Delivery", icon: Truck },
+  { id: "settings", label: "Settings", icon: Settings }
+] as const;
+
+type AdminSection = (typeof sections)[number]["id"];
+
+type AdminOrder = {
+  id: string;
+  status: string;
+  createdAt: string;
+  details: {
+    mode: string;
+    name: string;
+    phone: string;
+    address: string;
+    zipcode: string;
+    suburb?: string;
+    time?: string;
+    notes?: string;
+  };
+  items: Array<{
+    name?: string;
+    quantity?: number;
+    price?: number;
+    productId?: string;
+    size?: { name?: string; extra?: number };
+    spice?: string;
+  }>;
+  total: number;
+  snapshot?: unknown;
+};
+
+type ProductFormState = {
+  categoryId: string;
+  name: string;
+  price: string;
+  image: string;
+  description: string;
+  sizeOptions: string;
+  spiceOptions: string;
+};
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function parseSizeOptions(value: string): SizeOption[] {
+  if (!value.trim()) return [];
+  return value
+    .split(",")
+    .map((item) => {
+      const [name, extra = "0"] = item.split(":").map((part) => part.trim());
+      return { name, extra: Number(extra) || 0 };
+    })
+    .filter((item) => item.name);
+}
+
+function sizeOptionsToText(options: SizeOption[]) {
+  return options.map((option) => `${option.name}:${option.extra}`).join(", ");
+}
+
+function money(value: number) {
+  return `$${value.toFixed(2)}`;
+}
+
+function productToFormState(product: MenuProduct): ProductFormState {
+  return {
+    categoryId: product.categoryId,
+    name: product.name,
+    price: String(product.price),
+    image: product.image,
+    description: product.description,
+    sizeOptions: sizeOptionsToText(product.sizeOptions),
+    spiceOptions: product.spiceOptions.join(", ")
+  };
+}
+
+export default function AdminClient() {
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [loginStatus, setLoginStatus] = useState("");
+  const [section, setSection] = useState<AdminSection>("dashboard");
+  const [store, setStore] = useState<MenuStore | null>(null);
+  const [settings, setSettings] = useState<SiteSettings | null>(null);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [status, setStatus] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState("");
+  const [editingCategoryName, setEditingCategoryName] = useState("");
+  const [editingProductId, setEditingProductId] = useState("");
+  const [editingProduct, setEditingProduct] = useState<ProductFormState | null>(null);
+
+  const selectedProducts = useMemo(() => {
+    return store?.products.filter((product) => product.categoryId === selectedCategory) ?? [];
+  }, [selectedCategory, store]);
+
+  const orderTotal = useMemo(
+    () => orders.reduce((sum, order) => sum + order.total, 0),
+    [orders]
+  );
+  const showMenuSave = section === "categories" || section === "products" || section === "delivery";
+
+  const loadAdminData = useCallback(async () => {
+    const [menuResponse, settingsResponse, ordersResponse] = await Promise.all([
+      fetch("/api/admin/menu"),
+      fetch("/api/admin/settings"),
+      fetch("/api/admin/orders")
+    ]);
+    if (!menuResponse.ok || !settingsResponse.ok || !ordersResponse.ok) {
+      setAuthenticated(false);
+      return;
+    }
+    const menuData = (await menuResponse.json()) as MenuStore;
+    setStore(menuData);
+    setSelectedCategory(menuData.categories[0]?.id ?? "");
+    setSettings((await settingsResponse.json()) as SiteSettings);
+    setOrders((await ordersResponse.json()) as AdminOrder[]);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/admin/session")
+      .then((response) => response.json())
+      .then((data: { authenticated: boolean }) => {
+        setAuthenticated(data.authenticated);
+        if (data.authenticated) {
+          loadAdminData();
+        }
+      })
+      .catch(() => {
+        setAuthenticated(false);
+        setLoginStatus("The admin service could not be reached. Please refresh.");
+      });
+  }, [loadAdminData]);
+
+  async function login(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoginStatus("Signing in...");
+    const form = new FormData(event.currentTarget);
+    const response = await fetch("/api/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: form.get("email"),
+        password: form.get("password")
+      })
+    });
+
+    if (!response.ok) {
+      setLoginStatus("Invalid email or password.");
+      return;
+    }
+
+    setAuthenticated(true);
+    setLoginStatus("");
+    await loadAdminData();
+  }
+
+  async function logout() {
+    await fetch("/api/admin/logout", { method: "POST" });
+    setAuthenticated(false);
+  }
+
+  async function saveStore(nextStore = store) {
+    if (!nextStore) return;
+    setStatus("Saving menu...");
+    const response = await fetch("/api/admin/menu", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(nextStore)
+    });
+    setStatus(response.ok ? "Menu saved." : "Could not save menu changes.");
+  }
+
+  async function saveSettings(nextSettings = settings, newPassword = "") {
+    if (!nextSettings) return;
+    setStatus("Saving settings...");
+    const response = await fetch("/api/admin/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...nextSettings,
+        admin: {
+          ...nextSettings.admin,
+          newPassword
+        }
+      })
+    });
+    setStatus(response.ok ? "Settings saved." : "Could not save settings.");
+  }
+
+  function addCategory(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!store) return;
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") ?? "").trim();
+    if (!name) return;
+    const category = {
+      id: slugify(name),
+      name,
+      sortOrder: store.categories.length + 1
+    };
+    const nextStore = { ...store, categories: [...store.categories, category] };
+    setStore(nextStore);
+    setSelectedCategory(category.id);
+    event.currentTarget.reset();
+  }
+
+  function deleteCategory(id: string) {
+    if (!store) return;
+    const nextCategories = store.categories.filter((category) => category.id !== id);
+    const nextStore = {
+      ...store,
+      categories: nextCategories,
+      products: store.products.filter((product) => product.categoryId !== id)
+    };
+    setStore(nextStore);
+    setSelectedCategory(nextCategories[0]?.id ?? "");
+    if (editingCategoryId === id) {
+      setEditingCategoryId("");
+      setEditingCategoryName("");
+    }
+  }
+
+  function startEditCategory(category: MenuStore["categories"][number]) {
+    setEditingCategoryId(category.id);
+    setEditingCategoryName(category.name);
+  }
+
+  function saveCategoryName(id: string) {
+    if (!store) return;
+    const name = editingCategoryName.trim();
+    if (!name) return;
+    setStore({
+      ...store,
+      categories: store.categories.map((category) =>
+        category.id === id ? { ...category, name } : category
+      )
+    });
+    setEditingCategoryId("");
+    setEditingCategoryName("");
+  }
+
+  async function uploadImage(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch("/api/admin/upload", { method: "POST", body: form });
+    const data = (await response.json()) as { url?: string };
+    return data.url ?? "";
+  }
+
+  async function addProduct(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!store) return;
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") ?? "").trim();
+    const file = form.get("image");
+    const uploadedImage = file instanceof File && file.size ? await uploadImage(file) : "";
+    const image = uploadedImage || String(form.get("imageUrl") ?? "/images/butter-chicken.webp");
+    const product: MenuProduct = {
+      id: `${slugify(name)}-${store.products.length + 1}`,
+      categoryId: String(form.get("categoryId") ?? selectedCategory),
+      name,
+      description: String(form.get("description") ?? ""),
+      price: Number(form.get("price") ?? 0),
+      image,
+      sizeOptions: parseSizeOptions(String(form.get("sizeOptions") ?? "")),
+      spiceOptions: String(form.get("spiceOptions") ?? "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      active: true
+    };
+
+    setStore({ ...store, products: [...store.products, product] });
+    event.currentTarget.reset();
+  }
+
+  function deleteProduct(id: string) {
+    if (!store) return;
+    setStore({ ...store, products: store.products.filter((product) => product.id !== id) });
+    if (editingProductId === id) {
+      setEditingProductId("");
+      setEditingProduct(null);
+    }
+  }
+
+  function startEditProduct(product: MenuProduct) {
+    setEditingProductId(product.id);
+    setEditingProduct(productToFormState(product));
+  }
+
+  function updateEditingProduct(updates: Partial<ProductFormState>) {
+    if (!editingProduct) return;
+    setEditingProduct({ ...editingProduct, ...updates });
+  }
+
+  async function saveEditedProduct(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!store || !editingProduct || !editingProductId) return;
+    const form = new FormData(event.currentTarget);
+    const file = form.get("image");
+    const uploadedImage = file instanceof File && file.size ? await uploadImage(file) : "";
+    const nextImage = uploadedImage || editingProduct.image || "/images/butter-chicken.webp";
+    const nextProduct: MenuProduct = {
+      id: editingProductId,
+      categoryId: editingProduct.categoryId,
+      name: editingProduct.name.trim(),
+      description: editingProduct.description,
+      price: Number(editingProduct.price) || 0,
+      image: nextImage,
+      sizeOptions: parseSizeOptions(editingProduct.sizeOptions),
+      spiceOptions: editingProduct.spiceOptions
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      active: true
+    };
+
+    setStore({
+      ...store,
+      products: store.products.map((product) =>
+        product.id === editingProductId ? nextProduct : product
+      )
+    });
+    setSelectedCategory(nextProduct.categoryId);
+    setEditingProductId("");
+    setEditingProduct(null);
+  }
+
+  async function uploadSettingImage(
+    event: React.ChangeEvent<HTMLInputElement>,
+    key: keyof SiteSettings["branding"]
+  ) {
+    const file = event.target.files?.[0];
+    if (!file || !settings) return;
+    const url = await uploadImage(file);
+    setSettings({
+      ...settings,
+      branding: {
+        ...settings.branding,
+        [key]: url
+      }
+    });
+  }
+
+  if (authenticated === null) {
+    return <main className="admin-login-page">Loading admin...</main>;
+  }
+
+  if (!authenticated) {
+    return (
+      <main className="admin-login-page">
+        <form className="admin-login-card" onSubmit={login}>
+          <img src="/meharbaan-logo.png" alt="Meharbaan Indian Cuisine" />
+          <h1>Admin Login</h1>
+          <p>Sign in to manage menu, orders and website settings.</p>
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" defaultValue="rana33994@gmail.com" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input name="password" type="password" placeholder="Password" required />
+          </label>
+          <button className="button button-green" type="submit">
+            Sign In
+          </button>
+          <small>Default password: Meharbaan@2026</small>
+          {loginStatus ? <strong>{loginStatus}</strong> : null}
+        </form>
+      </main>
+    );
+  }
+
+  if (!store || !settings) {
+    return <main className="admin-login-page">Loading dashboard...</main>;
+  }
+
+  return (
+    <main className="admin-app">
+      <aside className="admin-sidebar">
+        <img src={settings.branding.logo} alt={settings.branding.siteName} />
+        <nav>
+          {sections.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                className={section === item.id ? "active" : ""}
+                key={item.id}
+                type="button"
+                onClick={() => setSection(item.id)}
+              >
+                <Icon size={18} aria-hidden="true" />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+        <button className="admin-logout" type="button" onClick={logout}>
+          <LogOut size={18} aria-hidden="true" />
+          Logout
+        </button>
+      </aside>
+
+      <section className="admin-main">
+        <header className="admin-topbar">
+          <div>
+            <p>Admin Portal</p>
+            <h1>{sections.find((item) => item.id === section)?.label}</h1>
+          </div>
+          <div className="admin-top-actions">
+            <span>{settings.admin.email}</span>
+            {showMenuSave ? (
+              <button className="button button-green" type="button" onClick={() => saveStore()}>
+                Save Menu
+              </button>
+            ) : null}
+          </div>
+        </header>
+
+        {status ? <div className="admin-status">{status}</div> : null}
+
+        {section === "dashboard" ? (
+          <Dashboard
+            categoryCount={store.categories.length}
+            productCount={store.products.length}
+            orderCount={orders.length}
+            orderTotal={orderTotal}
+            orders={orders}
+          />
+        ) : null}
+
+        {section === "orders" ? <OrdersPanel orders={orders} /> : null}
+
+        {section === "categories" ? (
+          <section className="admin-card">
+            <div className="admin-card-header">
+              <div>
+                <h2>Categories</h2>
+                <p>Create and organize menu categories.</p>
+              </div>
+            </div>
+            <form className="admin-inline-form" onSubmit={addCategory}>
+              <input name="name" placeholder="Category name" />
+              <button className="button button-green" type="submit">
+                Add Category
+              </button>
+            </form>
+            <div className="admin-table-wrap">
+              <table className="admin-table admin-category-table">
+                <thead>
+                  <tr>
+                    <th>Sort</th>
+                    <th>Category</th>
+                    <th>Products</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {store.categories.map((category) => {
+                    const isEditing = editingCategoryId === category.id;
+                    const productCount = store.products.filter(
+                      (product) => product.categoryId === category.id
+                    ).length;
+
+                    return (
+                      <tr className={selectedCategory === category.id ? "active" : ""} key={category.id}>
+                        <td>{category.sortOrder}</td>
+                        <td>
+                          {isEditing ? (
+                            <input
+                              value={editingCategoryName}
+                              onChange={(event) => setEditingCategoryName(event.target.value)}
+                            />
+                          ) : (
+                            <button
+                              className="admin-text-button"
+                              type="button"
+                              onClick={() => setSelectedCategory(category.id)}
+                            >
+                              {category.name}
+                            </button>
+                          )}
+                          <small>{category.id}</small>
+                        </td>
+                        <td>{productCount}</td>
+                        <td>
+                          <div className="admin-actions">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  className="button button-green"
+                                  type="button"
+                                  onClick={() => saveCategoryName(category.id)}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  className="button button-light admin-muted-button"
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingCategoryId("");
+                                    setEditingCategoryName("");
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="button button-light admin-muted-button"
+                                  type="button"
+                                  onClick={() => startEditCategory(category)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="button admin-danger-button"
+                                  type="button"
+                                  onClick={() => deleteCategory(category.id)}
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+
+        {section === "products" ? (
+          <section className="admin-stack">
+            <div className="admin-card">
+              <div className="admin-card-header">
+                <div>
+                  <h2>Add Product</h2>
+                  <p>Add product details, image, size options and spice options.</p>
+                </div>
+              </div>
+              <form className="admin-product-form" onSubmit={addProduct}>
+                <label>
+                  <span>Category</span>
+                  <select name="categoryId" defaultValue={selectedCategory}>
+                    {store.categories.map((category) => (
+                      <option value={category.id} key={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Product Name</span>
+                  <input name="name" placeholder="Butter Naan" required />
+                </label>
+                <label>
+                  <span>Price</span>
+                  <input name="price" type="number" step="0.01" placeholder="5.60" required />
+                </label>
+                <label>
+                  <span>Image Upload</span>
+                  <input name="image" type="file" accept="image/*" />
+                </label>
+                <label className="full-field">
+                  <span>Image URL</span>
+                  <input name="imageUrl" placeholder="/butter-chicken.webp" />
+                </label>
+                <label className="full-field">
+                  <span>Description</span>
+                  <textarea name="description" rows={3} placeholder="Product description" />
+                </label>
+                <label className="full-field">
+                  <span>Size Options</span>
+                  <input name="sizeOptions" placeholder="Small:0, Large:2.80" />
+                  <small>Example: Small:0, Large:2.80 means Large adds $2.80.</small>
+                </label>
+                <label className="full-field">
+                  <span>Spice Options</span>
+                  <input name="spiceOptions" placeholder="Sweet, Mild, Medium, Hot, Extra Hot" />
+                </label>
+                <button className="button button-green full-field" type="submit">
+                  Add Product
+                </button>
+              </form>
+            </div>
+            <div className="admin-card">
+              <div className="admin-card-header">
+                <div>
+                  <h2>Products</h2>
+                  <p>Showing products from selected category.</p>
+                </div>
+                <select
+                  value={selectedCategory}
+                  onChange={(event) => setSelectedCategory(event.target.value)}
+                >
+                  {store.categories.map((category) => (
+                    <option value={category.id} key={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {editingProduct ? (
+                <form className="admin-product-form admin-edit-product-form" onSubmit={saveEditedProduct}>
+                  <label>
+                    <span>Category</span>
+                    <select
+                      value={editingProduct.categoryId}
+                      onChange={(event) => updateEditingProduct({ categoryId: event.target.value })}
+                    >
+                      {store.categories.map((category) => (
+                        <option value={category.id} key={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Product Name</span>
+                    <input
+                      value={editingProduct.name}
+                      onChange={(event) => updateEditingProduct({ name: event.target.value })}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Price</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editingProduct.price}
+                      onChange={(event) => updateEditingProduct({ price: event.target.value })}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Replace Image</span>
+                    <input name="image" type="file" accept="image/*" />
+                  </label>
+                  <label className="full-field">
+                    <span>Image URL</span>
+                    <input
+                      value={editingProduct.image}
+                      onChange={(event) => updateEditingProduct({ image: event.target.value })}
+                    />
+                  </label>
+                  <label className="full-field">
+                    <span>Description</span>
+                    <textarea
+                      rows={3}
+                      value={editingProduct.description}
+                      onChange={(event) => updateEditingProduct({ description: event.target.value })}
+                    />
+                  </label>
+                  <label className="full-field">
+                    <span>Size Options</span>
+                    <input
+                      value={editingProduct.sizeOptions}
+                      onChange={(event) => updateEditingProduct({ sizeOptions: event.target.value })}
+                    />
+                    <small>Example: Small:0, Large:2.80 means Large adds $2.80.</small>
+                  </label>
+                  <label className="full-field">
+                    <span>Spice Options</span>
+                    <input
+                      value={editingProduct.spiceOptions}
+                      onChange={(event) => updateEditingProduct({ spiceOptions: event.target.value })}
+                    />
+                    <small>Normal is always shown automatically on the order popup.</small>
+                  </label>
+                  <div className="admin-actions full-field">
+                    <button className="button button-green" type="submit">
+                      Save Product
+                    </button>
+                    <button
+                      className="button button-light admin-muted-button"
+                      type="button"
+                      onClick={() => {
+                        setEditingProductId("");
+                        setEditingProduct(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+              <div className="admin-products">
+                {selectedProducts.map((product) => (
+                  <article key={product.id}>
+                    <img src={product.image} alt={product.name} />
+                    <div>
+                      <h3>{product.name}</h3>
+                      <p>{product.description}</p>
+                      <small>
+                        {money(product.price)}
+                        {product.sizeOptions.length
+                          ? ` | Sizes: ${sizeOptionsToText(product.sizeOptions)}`
+                          : ""}
+                        {product.spiceOptions.length
+                          ? ` | Spice: ${product.spiceOptions.join(", ")}`
+                          : ""}
+                      </small>
+                    </div>
+                    <div className="admin-product-actions">
+                      <button type="button" onClick={() => startEditProduct(product)}>
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => deleteProduct(product.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {section === "delivery" ? (
+          <section className="admin-card">
+            <div className="admin-card-header">
+              <div>
+                <h2>Delivery Settings</h2>
+                <p>Manage order types, delivery suburbs and time slots shown on the menu page.</p>
+              </div>
+            </div>
+            <div className="admin-product-form admin-order-options">
+              <label>
+                <span>Delivery Orders</span>
+                <select
+                  value={store.orderOptions.delivery ? "enabled" : "disabled"}
+                  onChange={(event) =>
+                    setStore({
+                      ...store,
+                      orderOptions: {
+                        ...store.orderOptions,
+                        delivery: event.target.value === "enabled"
+                      }
+                    })
+                  }
+                >
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </label>
+              <label>
+                <span>Pickup Orders</span>
+                <select
+                  value={store.orderOptions.pickup ? "enabled" : "disabled"}
+                  onChange={(event) =>
+                    setStore({
+                      ...store,
+                      orderOptions: {
+                        ...store.orderOptions,
+                        pickup: event.target.value === "enabled"
+                      }
+                    })
+                  }
+                >
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </label>
+              <label>
+                <span>Restaurant Status</span>
+                <select
+                  value={store.orderOptions.open !== false ? "open" : "closed"}
+                  onChange={(event) =>
+                    setStore({
+                      ...store,
+                      orderOptions: {
+                        ...store.orderOptions,
+                        open: event.target.value === "open"
+                      }
+                    })
+                  }
+                >
+                  <option value="open">Open</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </label>
+            </div>
+            <div className="time-slot-grid">
+              {days.map((day) => (
+                <label key={day}>
+                  <span>{day}</span>
+                  <input
+                    value={(store.timeSlots[day] ?? []).join(", ")}
+                    onChange={(event) =>
+                      setStore({
+                        ...store,
+                        timeSlots: {
+                          ...store.timeSlots,
+                          [day]: event.target.value
+                            .split(",")
+                            .map((item) => item.trim())
+                            .filter(Boolean)
+                        }
+                      })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {section === "settings" ? (
+          <SettingsPanel
+            settings={settings}
+            setSettings={setSettings}
+            saveSettings={saveSettings}
+            uploadSettingImage={uploadSettingImage}
+          />
+        ) : null}
+      </section>
+    </main>
+  );
+}
+
+function Dashboard({
+  categoryCount,
+  productCount,
+  orderCount,
+  orderTotal,
+  orders
+}: {
+  categoryCount: number;
+  productCount: number;
+  orderCount: number;
+  orderTotal: number;
+  orders: AdminOrder[];
+}) {
+  return (
+    <section className="admin-stack">
+      <div className="admin-stat-grid">
+        <Stat title="Orders" value={String(orderCount)} icon={ShoppingBag} />
+        <Stat title="Revenue" value={money(orderTotal)} icon={Clock} />
+        <Stat title="Products" value={String(productCount)} icon={PackagePlus} />
+        <Stat title="Categories" value={String(categoryCount)} icon={Tags} />
+      </div>
+      <OrdersPanel orders={orders.slice(0, 6)} compact />
+    </section>
+  );
+}
+
+function Stat({
+  title,
+  value,
+  icon: Icon
+}: {
+  title: string;
+  value: string;
+  icon: typeof ShoppingBag;
+}) {
+  return (
+    <article className="admin-stat-card">
+      <Icon size={22} aria-hidden="true" />
+      <span>{title}</span>
+      <strong>{value}</strong>
+    </article>
+  );
+}
+
+function OrdersPanel({ orders, compact = false }: { orders: AdminOrder[]; compact?: boolean }) {
+  const [selectedOrder, setSelectedOrder] = useState<AdminOrder | null>(null);
+
+  return (
+    <section className="admin-card">
+      <div className="admin-card-header">
+        <div>
+          <h2>{compact ? "Recent Orders" : "Orders List"}</h2>
+          <p>Customer order details saved from checkout.</p>
+        </div>
+      </div>
+      <div className="admin-table-wrap">
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Customer</th>
+              <th>Type</th>
+              <th>Time</th>
+              <th>Total</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.length ? (
+              orders.map((order) => (
+                <tr key={order.id}>
+                  <td>
+                    <strong>{order.id.slice(0, 8)}</strong>
+                    <small>{new Date(order.createdAt).toLocaleString()}</small>
+                  </td>
+                  <td>
+                    <strong>{order.details.name}</strong>
+                    <small>{order.details.phone}</small>
+                  </td>
+                  <td>{order.details.mode}</td>
+                  <td>{order.details.time || "-"}</td>
+                  <td>{money(order.total)}</td>
+                  <td>
+                    <span className="order-status">{order.status}</span>
+                  </td>
+                  <td>
+                    <button
+                      className="admin-view-button"
+                      type="button"
+                      onClick={() => setSelectedOrder(order)}
+                    >
+                      View
+                    </button>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={7}>No orders yet.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {selectedOrder ? (
+        <OrderDetailsModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
+      ) : null}
+    </section>
+  );
+}
+
+function OrderDetailsModal({ order, onClose }: { order: AdminOrder; onClose: () => void }) {
+  return (
+    <div className="modal-backdrop admin-order-backdrop" role="dialog" aria-modal="true" aria-label="Order details">
+      <div className="admin-order-modal">
+        <div className="admin-card-header">
+          <div>
+            <p>Order Details</p>
+            <h2>#{order.id.slice(0, 8)}</h2>
+          </div>
+          <button className="admin-view-button" type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <div className="admin-order-detail-grid">
+          <div>
+            <span>Customer</span>
+            <strong>{order.details.name}</strong>
+            <small>{order.details.phone}</small>
+          </div>
+          <div>
+            <span>Order Type</span>
+            <strong>{order.details.mode}</strong>
+            <small>{order.details.time || "No time selected"}</small>
+          </div>
+          <div>
+            <span>Address</span>
+            <strong>{order.details.address || "-"}</strong>
+            <small>
+              {[order.details.suburb, order.details.zipcode].filter(Boolean).join(" ") || "-"}
+            </small>
+          </div>
+          <div>
+            <span>Status</span>
+            <strong>{order.status}</strong>
+            <small>{new Date(order.createdAt).toLocaleString()}</small>
+          </div>
+        </div>
+
+        {order.details.notes ? (
+          <div className="admin-order-notes">
+            <span>Order Notes</span>
+            <p>{order.details.notes}</p>
+          </div>
+        ) : null}
+
+        <div className="admin-table-wrap">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Options</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {order.items.map((item, index) => (
+                <tr key={`${item.productId || item.name}-${index}`}>
+                  <td>{item.name || "Item"}</td>
+                  <td>
+                    {[item.size?.name, item.spice].filter(Boolean).join(", ") || "-"}
+                  </td>
+                  <td>{item.quantity || 1}</td>
+                  <td>{money(Number(item.price || 0))}</td>
+                  <td>{money(Number(item.price || 0) * Number(item.quantity || 1))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="admin-order-total">
+          <span>Total</span>
+          <strong>{money(order.total)}</strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsPanel({
+  settings,
+  setSettings,
+  saveSettings,
+  uploadSettingImage
+}: {
+  settings: SiteSettings;
+  setSettings: (settings: SiteSettings) => void;
+  saveSettings: (settings: SiteSettings, newPassword?: string) => Promise<void>;
+  uploadSettingImage: (
+    event: React.ChangeEvent<HTMLInputElement>,
+    key: keyof SiteSettings["branding"]
+  ) => Promise<void>;
+}) {
+  const [newPassword, setNewPassword] = useState("");
+  const [testMailStatus, setTestMailStatus] = useState("");
+  const [testMailError, setTestMailError] = useState("");
+  const [isTestingMail, setIsTestingMail] = useState(false);
+
+  async function sendTestMail() {
+    setIsTestingMail(true);
+    setTestMailStatus("Saving settings and sending test email...");
+    setTestMailError("");
+
+    await saveSettings(settings, "");
+    const response = await fetch("/api/admin/test-mail", { method: "POST" });
+    const data = (await response.json()) as { ok?: boolean; messageId?: string; error?: string };
+
+    if (response.ok && data.ok) {
+      setTestMailStatus(`Test email sent to ${settings.mail.adminEmail}.`);
+      setTestMailError(data.messageId ? `Message ID: ${data.messageId}` : "");
+    } else {
+      setTestMailStatus("Test email failed.");
+      setTestMailError(data.error || `Request failed with status ${response.status}.`);
+    }
+    setIsTestingMail(false);
+  }
+
+  return (
+    <section className="admin-stack">
+      <div className="admin-card">
+        <div className="admin-card-header">
+          <div>
+            <h2>Website Settings</h2>
+            <p>Logo, favicon, contact details and social links.</p>
+          </div>
+        </div>
+        <div className="admin-logo-preview-grid">
+          <AdminImagePreview title="Website logo" src={settings.branding.logo} wide />
+          <AdminImagePreview title="Footer logo" src={settings.branding.footerLogo} wide />
+          <AdminImagePreview title="Favicon" src={settings.branding.favicon} />
+        </div>
+        <div className="admin-product-form">
+          <label>
+            <span>Website Name</span>
+            <input
+              value={settings.branding.siteName}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  branding: { ...settings.branding, siteName: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>Logo URL</span>
+            <input
+              value={settings.branding.logo}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  branding: { ...settings.branding, logo: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>Upload Website Logo</span>
+            <input type="file" accept="image/*" onChange={(event) => uploadSettingImage(event, "logo")} />
+          </label>
+          <label>
+            <span>Footer Logo URL</span>
+            <input
+              value={settings.branding.footerLogo}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  branding: { ...settings.branding, footerLogo: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>Upload Footer Logo</span>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => uploadSettingImage(event, "footerLogo")}
+            />
+          </label>
+          <label>
+            <span>Favicon URL</span>
+            <input
+              value={settings.branding.favicon}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  branding: { ...settings.branding, favicon: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>Upload Favicon</span>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => uploadSettingImage(event, "favicon")}
+            />
+          </label>
+          <label>
+            <span>Phone</span>
+            <input
+              value={settings.contact.phone}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  contact: { ...settings.contact, phone: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>Email</span>
+            <input
+              value={settings.contact.email}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  contact: { ...settings.contact, email: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label className="full-field">
+            <span>Address</span>
+            <input
+              value={settings.contact.address}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  contact: { ...settings.contact, address: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>Facebook</span>
+            <input
+              value={settings.contact.facebook}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  contact: { ...settings.contact, facebook: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>Instagram</span>
+            <input
+              value={settings.contact.instagram}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  contact: { ...settings.contact, instagram: event.target.value }
+                })
+              }
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="admin-card">
+        <div className="admin-card-header">
+          <div>
+            <h2>Stripe Payment Settings</h2>
+            <p>
+              Enable secure hosted card payments at checkout. Add this webhook
+              in Stripe: <code>/api/stripe/webhook</code>
+            </p>
+          </div>
+        </div>
+        <div className="admin-product-form">
+          <label>
+            <span>Enable Stripe</span>
+            <select
+              value={settings.stripe.enabled ? "yes" : "no"}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  stripe: {
+                    ...settings.stripe,
+                    enabled: event.target.value === "yes"
+                  }
+                })
+              }
+            >
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </select>
+          </label>
+          <label>
+            <span>Currency</span>
+            <select
+              value={settings.stripe.currency}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  stripe: { ...settings.stripe, currency: event.target.value }
+                })
+              }
+            >
+              <option value="nzd">NZD — New Zealand Dollar</option>
+              <option value="aud">AUD — Australian Dollar</option>
+              <option value="usd">USD — US Dollar</option>
+            </select>
+          </label>
+          <label>
+            <span>Mode</span>
+            <select
+              value={settings.stripe.mode || "live"}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  stripe: {
+                    ...settings.stripe,
+                    mode: event.target.value as "live" | "test"
+                  }
+                })
+              }
+            >
+              <option value="live">Live</option>
+              <option value="test">Test (Sandbox)</option>
+            </select>
+          </label>
+          <label className="full-field">
+            <span>Publishable Key</span>
+            <input
+              value={settings.stripe.publishableKey}
+              placeholder="pk_live_..."
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  stripe: {
+                    ...settings.stripe,
+                    publishableKey: event.target.value
+                  }
+                })
+              }
+            />
+          </label>
+          <label className="full-field">
+            <span>Secret Key</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={settings.stripe.secretKey}
+              placeholder="sk_live_..."
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  stripe: { ...settings.stripe, secretKey: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label className="full-field">
+            <span>Webhook Signing Secret</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={settings.stripe.webhookSecret}
+              placeholder="whsec_..."
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  stripe: {
+                    ...settings.stripe,
+                    webhookSecret: event.target.value
+                  }
+                })
+              }
+            />
+            <small>
+              Stripe Dashboard webhook URL:
+              {" "}https://meharbaan.co.nz/api/stripe/webhook
+            </small>
+          </label>
+          <label className="full-field">
+            <span>Test Publishable Key</span>
+            <input
+              value={settings.stripe.testPublishableKey || ""}
+              placeholder="pk_test_..."
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  stripe: {
+                    ...settings.stripe,
+                    testPublishableKey: event.target.value
+                  }
+                })
+              }
+            />
+          </label>
+          <label className="full-field">
+            <span>Test Secret Key</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={settings.stripe.testSecretKey || ""}
+              placeholder="sk_test_..."
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  stripe: {
+                    ...settings.stripe,
+                    testSecretKey: event.target.value
+                  }
+                })
+              }
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="admin-card">
+        <div className="admin-card-header">
+          <div>
+            <h2>Mail Settings</h2>
+            <p>Mail settings are saved in the database and used directly by the website.</p>
+          </div>
+          <button
+            className="button button-green"
+            type="button"
+            disabled={isTestingMail}
+            onClick={sendTestMail}
+          >
+            {isTestingMail ? "Sending..." : "Send Test Mail"}
+          </button>
+        </div>
+        {testMailStatus ? (
+          <div className={testMailError && testMailStatus.includes("failed") ? "admin-error-box" : "admin-info-box"}>
+            <strong>{testMailStatus}</strong>
+            {testMailError ? <pre>{testMailError}</pre> : null}
+          </div>
+        ) : null}
+        <div className="admin-product-form">
+          <label>
+            <span>Enable Email</span>
+            <select
+              value={settings.mail.enabled ? "yes" : "no"}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  mail: { ...settings.mail, enabled: event.target.value === "yes" }
+                })
+              }
+            >
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+          </label>
+          <label>
+            <span>SMTP Host</span>
+            <input
+              value={settings.mail.host}
+              onChange={(event) =>
+                setSettings({ ...settings, mail: { ...settings.mail, host: event.target.value } })
+              }
+            />
+          </label>
+          <label>
+            <span>SMTP Port</span>
+            <input
+              type="number"
+              value={settings.mail.port}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  mail: { ...settings.mail, port: Number(event.target.value) }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>Secure</span>
+            <select
+              value={settings.mail.secure ? "yes" : "no"}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  mail: { ...settings.mail, secure: event.target.value === "yes" }
+                })
+              }
+            >
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+          </label>
+          <label>
+            <span>SMTP Username</span>
+            <input
+              value={settings.mail.username}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  mail: { ...settings.mail, username: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>Gmail App Password</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={settings.mail.password}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  mail: { ...settings.mail, password: event.target.value }
+                })
+              }
+            />
+            <small>Paste the Gmail app password here. Spaces are removed automatically for Gmail.</small>
+          </label>
+          <label>
+            <span>From Email</span>
+            <input
+              value={settings.mail.fromEmail}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  mail: { ...settings.mail, fromEmail: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>Admin Email</span>
+            <input
+              value={settings.mail.adminEmail}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  mail: { ...settings.mail, adminEmail: event.target.value }
+                })
+              }
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="admin-card">
+        <div className="admin-card-header">
+          <div>
+            <h2>Google reCAPTCHA</h2>
+            <p>Add your reCAPTCHA v2 keys for form spam protection on catering and contact pages.</p>
+          </div>
+        </div>
+        <div className="admin-product-form">
+          <label className="full-field">
+            <span>Site Key</span>
+            <input
+              value={settings.recaptcha?.siteKey ?? ""}
+              placeholder="6Lc..."
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  recaptcha: { ...settings.recaptcha, siteKey: event.target.value }
+                })
+              }
+            />
+            <small>The public site key shown in the reCAPTCHA widget.</small>
+          </label>
+          <label className="full-field">
+            <span>Secret Key</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={settings.recaptcha?.secretKey ?? ""}
+              placeholder="6Lc..."
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  recaptcha: { ...settings.recaptcha, secretKey: event.target.value }
+                })
+              }
+            />
+            <small>The private secret key used for server-side verification.</small>
+          </label>
+        </div>
+      </div>
+
+      <div className="admin-card">
+        <div className="admin-card-header">
+          <div>
+            <h2>Admin Account</h2>
+            <p>Change login email and password.</p>
+          </div>
+        </div>
+        <div className="admin-product-form">
+          <label>
+            <span>Admin Email</span>
+            <input
+              value={settings.admin.email}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  admin: { ...settings.admin, email: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>New Password</span>
+            <input
+              type="password"
+              value={newPassword}
+              placeholder="Leave blank to keep current password"
+              onChange={(event) => setNewPassword(event.target.value)}
+            />
+          </label>
+        </div>
+      </div>
+
+      <button className="button button-green admin-save-settings" type="button" onClick={() => saveSettings(settings, newPassword)}>
+        Save Settings
+      </button>
+    </section>
+  );
+}
+
+function AdminImagePreview({
+  title,
+  src,
+  wide = false
+}: {
+  title: string;
+  src: string;
+  wide?: boolean;
+}) {
+  return (
+    <div className="admin-upload-preview">
+      <span>{title}</span>
+      <img
+        src={src || "/meharbaan-logo.png"}
+        alt={title}
+        style={{
+          width: wide ? 210 : 54,
+          height: wide ? 58 : 54,
+          objectFit: "contain",
+        }}
+      />
+      <small>{src}</small>
+    </div>
+  );
+}
