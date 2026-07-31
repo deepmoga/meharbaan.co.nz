@@ -99,7 +99,7 @@ async function main() {
          }
          
          const p1 = parseFloat(prices[0].replace(/[^0-9.]/g, ''));
-         const p2 = parseFloat(prices[1] ? prices[1].replace(/[^0-9.]/g, '') : p1);
+         const p2 = prices[1] ? parseFloat(prices[1].replace(/[^0-9.]/g, '')) : p1;
          
          newProducts.push({
             id: crypto.randomUUID(),
