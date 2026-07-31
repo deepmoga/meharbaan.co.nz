@@ -4,13 +4,17 @@ import path from 'path';
 import fs from 'fs';
 import { readMenuStore, writeMenuStore, slugify } from './lib/menu-store';
 
+import { loadEnvConfig } from '@next/env';
+
+loadEnvConfig(process.cwd());
+
 async function main() {
   
   console.log('Reading Excel file...');
   const workbook = xlsx.readFile('menu.xlsx');
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
-  const data = xlsx.utils.sheet_to_json(sheet);
+  const data = xlsx.utils.sheet_to_json<any>(sheet);
   
   const existingStore = await readMenuStore();
   
