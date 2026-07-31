@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createOrder, readMenuStore } from "@/lib/menu-store";
 import type { CartItem, CheckoutDetails } from "@/lib/menu-types";
-import { getRemoteIp, verifyRecaptcha } from "@/lib/recaptcha";
+
 import { readSiteSettings } from "@/lib/site-settings";
 import { stripeRequest, type StripeCheckoutSession } from "@/lib/stripe";
 
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       details: CheckoutDetails;
       items: CartItem[];
-      captchaToken?: string;
+
     };
 
     if (!body.details?.name || !body.details?.phone || !body.items?.length) {
@@ -33,13 +33,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const captcha = await verifyRecaptcha(
-      body.captchaToken ?? "",
-      getRemoteIp(request),
-    );
-    if (!captcha.ok) {
-      return NextResponse.json({ error: captcha.error }, { status: 400 });
-    }
+
 
     const [settings, menu] = await Promise.all([
       readSiteSettings(),
