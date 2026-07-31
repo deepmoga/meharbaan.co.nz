@@ -4,9 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { readMenuStore, writeMenuStore, slugify } from './lib/menu-store';
 
-import { loadEnvConfig } from '@next/env';
 
-loadEnvConfig(process.cwd());
 
 async function main() {
   
