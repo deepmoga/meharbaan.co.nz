@@ -2,7 +2,7 @@ import nodemailer from "nodemailer";
 import type { CartItem, CheckoutDetails } from "@/lib/menu-types";
 import { readSiteSettings, type SiteSettings } from "@/lib/site-settings";
 
-type MailResult = {
+export type MailResult = {
   ok: boolean;
   messageId?: string;
   error?: string;

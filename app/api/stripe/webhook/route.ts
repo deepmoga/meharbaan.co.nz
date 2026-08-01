@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { updateOrderStatus } from "@/lib/menu-store";
+import { sendPaidOrderEmailsOnce } from "@/lib/paid-order-notification";
 import { readSiteSettings } from "@/lib/site-settings";
 import {
   verifyStripeSignature,
@@ -48,7 +49,14 @@ export async function POST(request: Request) {
       event.type === "checkout.session.completed" ||
       event.type === "checkout.session.async_payment_succeeded"
     ) {
-      await updateOrderStatus(orderId, "paid");
+      const mail = await sendPaidOrderEmailsOnce(orderId);
+      if (!mail.ok) {
+        console.error("Paid Stripe order email failed", mail.error);
+        return NextResponse.json(
+          { error: "Payment recorded, but order email could not be sent." },
+          { status: 500 },
+        );
+      }
     } else if (
       event.type === "checkout.session.expired" ||
       event.type === "checkout.session.async_payment_failed"

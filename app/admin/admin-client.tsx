@@ -186,7 +186,7 @@ export default function AdminClient() {
   }
 
   async function saveStore(nextStore = store) {
-    if (!nextStore) return;
+    if (!nextStore) return false;
     setStatus("Saving menu...");
     const response = await fetch("/api/admin/menu", {
       method: "PUT",
@@ -194,6 +194,7 @@ export default function AdminClient() {
       body: JSON.stringify(nextStore)
     });
     setStatus(response.ok ? "Menu saved." : "Could not save menu changes.");
+    return response.ok;
   }
 
   async function saveSettings(nextSettings = settings, newPassword = "") {
@@ -282,7 +283,7 @@ export default function AdminClient() {
     const uploadedImage = file instanceof File && file.size ? await uploadImage(file) : "";
     const image = uploadedImage || String(form.get("imageUrl") ?? "/images/butter-chicken.webp");
     const product: MenuProduct = {
-      id: `${slugify(name)}-${store.products.length + 1}`,
+      id: `${slugify(name)}-${Date.now().toString(36)}`,
       categoryId: String(form.get("categoryId") ?? selectedCategory),
       name,
       description: String(form.get("description") ?? ""),
@@ -296,8 +297,13 @@ export default function AdminClient() {
       active: true
     };
 
-    setStore({ ...store, products: [...store.products, product] });
-    event.currentTarget.reset();
+    const nextStore = { ...store, products: [...store.products, product] };
+    setStore(nextStore);
+    const saved = await saveStore(nextStore);
+    if (saved) {
+      setStatus(`${name} added and saved.`);
+      event.currentTarget.reset();
+    }
   }
 
   function deleteProduct(id: string) {

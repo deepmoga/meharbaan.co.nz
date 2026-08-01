@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { SiteFooter, SiteHeader } from "@/components/site-chrome";
-import { updateOrderStatus } from "@/lib/menu-store";
+import { sendPaidOrderEmailsOnce } from "@/lib/paid-order-notification";
 import { readSiteSettings } from "@/lib/site-settings";
 import { stripeRequest, type StripeCheckoutSession } from "@/lib/stripe";
 import ClearCart from "./clear-cart";
@@ -29,7 +29,10 @@ export default async function CheckoutSuccessPage({
         session.payment_status === "paid" ||
         session.payment_status === "no_payment_required";
       orderId = session.metadata?.order_id || "";
-      if (paid && orderId) await updateOrderStatus(orderId, "paid");
+      if (paid && orderId) {
+        const mail = await sendPaidOrderEmailsOnce(orderId);
+        if (!mail.ok) console.error("Paid Stripe order email failed", mail.error);
+      }
     } catch (error) {
       console.error("Could not verify Stripe checkout session", error);
     }
