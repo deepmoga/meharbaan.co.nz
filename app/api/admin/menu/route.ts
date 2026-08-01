@@ -9,7 +9,11 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     await requireAdmin();
-    return NextResponse.json(await readMenuStore());
+    return NextResponse.json(await readMenuStore(), {
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    });
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

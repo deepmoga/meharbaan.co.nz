@@ -36,7 +36,7 @@ export default function MenuClient() {
   const [cartOpen, setCartOpen] = useState(false);
 
   useEffect(() => {
-    fetch("/api/menu")
+    fetch("/api/menu", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("The menu could not be loaded.");
         return (await response.json()) as MenuStore;

@@ -6,7 +6,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    return NextResponse.json(await readMenuStore());
+    return NextResponse.json(await readMenuStore(), {
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    });
   } catch (error) {
     console.error("Menu API failed", error);
     return NextResponse.json(
