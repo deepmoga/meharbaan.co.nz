@@ -215,6 +215,24 @@
   font-size: 11px;
 }
 
+.online-product-body .portion-prices {
+  display: grid;
+  gap: 3px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.online-product-body .portion-prices span {
+  display: block;
+  color: #a67116;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.swal2-container {
+  z-index: 10000 !important;
+}
+
 .online-product-body > p {
   margin: 10px 0 14px;
   color: #72717a;

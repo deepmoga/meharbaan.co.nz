@@ -16,9 +16,22 @@ function money(value: number) {
 }
 
 function todayName() {
-  return new Intl.DateTimeFormat("en-NZ", { weekday: "long" }).format(
+  return new Intl.DateTimeFormat("en-NZ", {
+    weekday: "long",
+    timeZone: "Pacific/Auckland",
+  }).format(
     new Date(),
   );
+}
+
+function halfFullPrices(product: MenuProduct) {
+  const half = product.sizeOptions.find((option) => option.name.toLowerCase() === "half");
+  const full = product.sizeOptions.find((option) => option.name.toLowerCase() === "full");
+  if (!half || !full) return null;
+  return {
+    half: product.price + half.extra,
+    full: product.price + full.extra,
+  };
 }
 
 function lineId(product: MenuProduct, size?: SizeOption, spice?: string) {
@@ -198,12 +211,20 @@ export default function MenuClient() {
               {products.map((product) => {
                 const cartItem = cart.find((item) => item.productId === product.id);
                 const qty = cartItem ? cartItem.quantity : 0;
+                const portionPrices = halfFullPrices(product);
                 return (
                   <article className="online-product-card" key={product.id}>
                     <div className="online-product-body">
                       <div className="online-product-title">
                         <h3>{product.name}</h3>
-                        <strong>{money(product.price)}</strong>
+                        {portionPrices ? (
+                          <strong className="portion-prices">
+                            <span>Half {money(portionPrices.half)}</span>
+                            <span>Full {money(portionPrices.full)}</span>
+                          </strong>
+                        ) : (
+                          <strong>{money(product.price)}</strong>
+                        )}
                       </div>
                       <p>
                         {product.description ||
@@ -414,8 +435,7 @@ function ProductModal({
             >
               {product.sizeOptions.map((option) => (
                 <option key={option.name} value={option.name}>
-                  {option.name}
-                  {option.extra ? ` (+${money(option.extra)})` : ""}
+                  {option.name} · {money(product.price + option.extra)}
                 </option>
               ))}
             </select>

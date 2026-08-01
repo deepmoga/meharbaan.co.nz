@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Swal, { type SweetAlertIcon } from "sweetalert2";
 import {
   Clock,
   LayoutDashboard,
@@ -60,7 +61,71 @@ type ProductFormState = {
   description: string;
   sizeOptions: string;
   spiceOptions: string;
+  halfFullEnabled: boolean;
+  halfPrice: string;
+  fullPrice: string;
 };
+
+const newZealandTimeZone = "Pacific/Auckland";
+
+function showAdminToast(icon: SweetAlertIcon, title: string) {
+  return Swal.fire({
+    toast: true,
+    position: "top-end",
+    icon,
+    title,
+    showConfirmButton: false,
+    timer: 3500,
+    timerProgressBar: true,
+  });
+}
+
+function formatNewZealandDate(value: string) {
+  return new Intl.DateTimeFormat("en-NZ", {
+    timeZone: newZealandTimeZone,
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function halfFullPrices(product: Pick<MenuProduct, "price" | "sizeOptions">) {
+  const half = product.sizeOptions.find((option) => option.name.toLowerCase() === "half");
+  const full = product.sizeOptions.find((option) => option.name.toLowerCase() === "full");
+  if (!half || !full) return null;
+  return {
+    half: product.price + half.extra,
+    full: product.price + full.extra,
+  };
+}
+
+function halfFullSizeOptions(halfPrice: number, fullPrice: number): SizeOption[] {
+  return [
+    { name: "Half", extra: halfPrice - fullPrice },
+    { name: "Full", extra: 0 },
+  ];
+}
+
+function playNewOrderSound() {
+  try {
+    const AudioContextClass = window.AudioContext ||
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const context = new AudioContextClass();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.frequency.setValueAtTime(880, context.currentTime);
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.45);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.46);
+    oscillator.addEventListener("ended", () => void context.close());
+  } catch {
+    // The visible SweetAlert notification still works if browser audio is blocked.
+  }
+}
 
 function slugify(value: string) {
   return value
@@ -90,6 +155,7 @@ function money(value: number) {
 }
 
 function productToFormState(product: MenuProduct): ProductFormState {
+  const pricing = halfFullPrices(product);
   return {
     categoryId: product.categoryId,
     name: product.name,
@@ -97,7 +163,10 @@ function productToFormState(product: MenuProduct): ProductFormState {
     image: product.image,
     description: product.description,
     sizeOptions: sizeOptionsToText(product.sizeOptions),
-    spiceOptions: product.spiceOptions.join(", ")
+    spiceOptions: product.spiceOptions.join(", "),
+    halfFullEnabled: Boolean(pricing),
+    halfPrice: pricing ? String(pricing.half) : "",
+    fullPrice: pricing ? String(pricing.full) : String(product.price),
   };
 }
 
@@ -114,6 +183,9 @@ export default function AdminClient() {
   const [editingCategoryName, setEditingCategoryName] = useState("");
   const [editingProductId, setEditingProductId] = useState("");
   const [editingProduct, setEditingProduct] = useState<ProductFormState | null>(null);
+  const [newHalfFullEnabled, setNewHalfFullEnabled] = useState(false);
+  const knownOrderIds = useRef<Set<string>>(new Set());
+  const ordersLoaded = useRef(false);
 
   const selectedProducts = useMemo(() => {
     return store?.products.filter((product) => product.categoryId === selectedCategory) ?? [];
@@ -124,6 +196,37 @@ export default function AdminClient() {
     [orders]
   );
   const showMenuSave = section === "categories" || section === "products" || section === "delivery";
+
+  const refreshOrders = useCallback(async (notify = true) => {
+    let nextOrders: AdminOrder[];
+    try {
+      const response = await fetch("/api/admin/orders", { cache: "no-store" });
+      if (!response.ok) return;
+      nextOrders = (await response.json()) as AdminOrder[];
+    } catch {
+      return;
+    }
+    if (ordersLoaded.current && notify) {
+      const newOrders = nextOrders.filter((order) => !knownOrderIds.current.has(order.id));
+      if (newOrders.length) {
+        playNewOrderSound();
+        const newest = newOrders[0];
+        void Swal.fire({
+          icon: "info",
+          title: newOrders.length === 1 ? "New order received" : `${newOrders.length} new orders received`,
+          text: `${newest.details.name} · ${money(newest.total)} · ${newest.details.mode}`,
+          confirmButtonText: "View orders",
+          confirmButtonColor: "#0e153b",
+          allowOutsideClick: true,
+        }).then((result) => {
+          if (result.isConfirmed) setSection("orders");
+        });
+      }
+    }
+    knownOrderIds.current = new Set(nextOrders.map((order) => order.id));
+    ordersLoaded.current = true;
+    setOrders(nextOrders);
+  }, []);
 
   const loadAdminData = useCallback(async () => {
     const [menuResponse, settingsResponse, ordersResponse] = await Promise.all([
@@ -139,7 +242,10 @@ export default function AdminClient() {
     setStore(menuData);
     setSelectedCategory(menuData.categories[0]?.id ?? "");
     setSettings((await settingsResponse.json()) as SiteSettings);
-    setOrders((await ordersResponse.json()) as AdminOrder[]);
+    const loadedOrders = (await ordersResponse.json()) as AdminOrder[];
+    knownOrderIds.current = new Set(loadedOrders.map((order) => order.id));
+    ordersLoaded.current = true;
+    setOrders(loadedOrders);
   }, []);
 
   useEffect(() => {
@@ -156,6 +262,12 @@ export default function AdminClient() {
         setLoginStatus("The admin service could not be reached. Please refresh.");
       });
   }, [loadAdminData]);
+
+  useEffect(() => {
+    if (!authenticated) return;
+    const interval = window.setInterval(() => void refreshOrders(true), 10000);
+    return () => window.clearInterval(interval);
+  }, [authenticated, refreshOrders]);
 
   async function login(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -185,39 +297,62 @@ export default function AdminClient() {
     setAuthenticated(false);
   }
 
-  async function saveStore(nextStore = store) {
+  async function saveStore(nextStore = store, successMessage = "Menu saved successfully.") {
     if (!nextStore) return false;
     setStatus("Saving menu...");
-    const response = await fetch("/api/admin/menu", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(nextStore)
-    });
+    let response: Response;
+    try {
+      response = await fetch("/api/admin/menu", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextStore)
+      });
+    } catch {
+      setStatus("Could not save menu changes.");
+      void showAdminToast("error", "Could not reach the server.");
+      return false;
+    }
     setStatus(response.ok ? "Menu saved." : "Could not save menu changes.");
+    void showAdminToast(
+      response.ok ? "success" : "error",
+      response.ok ? successMessage : "Could not save menu changes.",
+    );
     return response.ok;
   }
 
   async function saveSettings(nextSettings = settings, newPassword = "") {
     if (!nextSettings) return;
     setStatus("Saving settings...");
-    const response = await fetch("/api/admin/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...nextSettings,
-        admin: {
-          ...nextSettings.admin,
-          newPassword
-        }
-      })
-    });
+    let response: Response;
+    try {
+      response = await fetch("/api/admin/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...nextSettings,
+          admin: {
+            ...nextSettings.admin,
+            newPassword
+          }
+        })
+      });
+    } catch {
+      setStatus("Could not save settings.");
+      void showAdminToast("error", "Could not reach the server.");
+      return;
+    }
     setStatus(response.ok ? "Settings saved." : "Could not save settings.");
+    void showAdminToast(
+      response.ok ? "success" : "error",
+      response.ok ? "Settings saved successfully." : "Could not save settings.",
+    );
   }
 
-  function addCategory(event: React.FormEvent<HTMLFormElement>) {
+  async function addCategory(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!store) return;
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const name = String(form.get("name") ?? "").trim();
     if (!name) return;
     const category = {
@@ -228,11 +363,21 @@ export default function AdminClient() {
     const nextStore = { ...store, categories: [...store.categories, category] };
     setStore(nextStore);
     setSelectedCategory(category.id);
-    event.currentTarget.reset();
+    if (await saveStore(nextStore, `${name} category added.`)) formElement.reset();
   }
 
-  function deleteCategory(id: string) {
+  async function deleteCategory(id: string) {
     if (!store) return;
+    const category = store.categories.find((item) => item.id === id);
+    const confirmation = await Swal.fire({
+      icon: "warning",
+      title: `Delete ${category?.name || "category"}?`,
+      text: "Products inside this category will also be deleted.",
+      showCancelButton: true,
+      confirmButtonText: "Delete",
+      confirmButtonColor: "#b42318",
+    });
+    if (!confirmation.isConfirmed) return;
     const nextCategories = store.categories.filter((category) => category.id !== id);
     const nextStore = {
       ...store,
@@ -245,6 +390,7 @@ export default function AdminClient() {
       setEditingCategoryId("");
       setEditingCategoryName("");
     }
+    await saveStore(nextStore, `${category?.name || "Category"} deleted.`);
   }
 
   function startEditCategory(category: MenuStore["categories"][number]) {
@@ -252,18 +398,20 @@ export default function AdminClient() {
     setEditingCategoryName(category.name);
   }
 
-  function saveCategoryName(id: string) {
+  async function saveCategoryName(id: string) {
     if (!store) return;
     const name = editingCategoryName.trim();
     if (!name) return;
-    setStore({
+    const nextStore = {
       ...store,
       categories: store.categories.map((category) =>
         category.id === id ? { ...category, name } : category
       )
-    });
+    };
+    setStore(nextStore);
     setEditingCategoryId("");
     setEditingCategoryName("");
+    await saveStore(nextStore, `${name} category updated.`);
   }
 
   async function uploadImage(file: File) {
@@ -277,19 +425,28 @@ export default function AdminClient() {
   async function addProduct(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!store) return;
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const name = String(form.get("name") ?? "").trim();
     const file = form.get("image");
     const uploadedImage = file instanceof File && file.size ? await uploadImage(file) : "";
     const image = uploadedImage || String(form.get("imageUrl") ?? "/images/butter-chicken.webp");
+    const fullPrice = Number(form.get("fullPrice") ?? form.get("price") ?? 0);
+    const halfPrice = Number(form.get("halfPrice") ?? 0);
+    if (newHalfFullEnabled && (halfPrice <= 0 || fullPrice <= 0 || halfPrice >= fullPrice)) {
+      void showAdminToast("error", "Half price must be lower than the Full price.");
+      return;
+    }
     const product: MenuProduct = {
       id: `${slugify(name)}-${Date.now().toString(36)}`,
       categoryId: String(form.get("categoryId") ?? selectedCategory),
       name,
       description: String(form.get("description") ?? ""),
-      price: Number(form.get("price") ?? 0),
+      price: newHalfFullEnabled ? fullPrice : Number(form.get("price") ?? 0),
       image,
-      sizeOptions: parseSizeOptions(String(form.get("sizeOptions") ?? "")),
+      sizeOptions: newHalfFullEnabled
+        ? halfFullSizeOptions(halfPrice, fullPrice)
+        : parseSizeOptions(String(form.get("sizeOptions") ?? "")),
       spiceOptions: String(form.get("spiceOptions") ?? "")
         .split(",")
         .map((item) => item.trim())
@@ -299,20 +456,35 @@ export default function AdminClient() {
 
     const nextStore = { ...store, products: [...store.products, product] };
     setStore(nextStore);
-    const saved = await saveStore(nextStore);
+    const saved = await saveStore(nextStore, `${name} added and saved.`);
     if (saved) {
       setStatus(`${name} added and saved.`);
-      event.currentTarget.reset();
+      setNewHalfFullEnabled(false);
+      formElement.reset();
     }
   }
 
-  function deleteProduct(id: string) {
+  async function deleteProduct(id: string) {
     if (!store) return;
-    setStore({ ...store, products: store.products.filter((product) => product.id !== id) });
+    const product = store.products.find((item) => item.id === id);
+    const confirmation = await Swal.fire({
+      icon: "warning",
+      title: `Delete ${product?.name || "product"}?`,
+      showCancelButton: true,
+      confirmButtonText: "Delete",
+      confirmButtonColor: "#b42318",
+    });
+    if (!confirmation.isConfirmed) return;
+    const nextStore = {
+      ...store,
+      products: store.products.filter((item) => item.id !== id),
+    };
+    setStore(nextStore);
     if (editingProductId === id) {
       setEditingProductId("");
       setEditingProduct(null);
     }
+    await saveStore(nextStore, `${product?.name || "Product"} deleted.`);
   }
 
   function startEditProduct(product: MenuProduct) {
@@ -332,14 +504,22 @@ export default function AdminClient() {
     const file = form.get("image");
     const uploadedImage = file instanceof File && file.size ? await uploadImage(file) : "";
     const nextImage = uploadedImage || editingProduct.image || "/images/butter-chicken.webp";
+    const fullPrice = Number(editingProduct.fullPrice) || Number(editingProduct.price) || 0;
+    const halfPrice = Number(editingProduct.halfPrice) || 0;
+    if (editingProduct.halfFullEnabled && (halfPrice <= 0 || fullPrice <= 0 || halfPrice >= fullPrice)) {
+      void showAdminToast("error", "Half price must be lower than the Full price.");
+      return;
+    }
     const nextProduct: MenuProduct = {
       id: editingProductId,
       categoryId: editingProduct.categoryId,
       name: editingProduct.name.trim(),
       description: editingProduct.description,
-      price: Number(editingProduct.price) || 0,
+      price: editingProduct.halfFullEnabled ? fullPrice : Number(editingProduct.price) || 0,
       image: nextImage,
-      sizeOptions: parseSizeOptions(editingProduct.sizeOptions),
+      sizeOptions: editingProduct.halfFullEnabled
+        ? halfFullSizeOptions(halfPrice, fullPrice)
+        : parseSizeOptions(editingProduct.sizeOptions),
       spiceOptions: editingProduct.spiceOptions
         .split(",")
         .map((item) => item.trim())
@@ -347,15 +527,17 @@ export default function AdminClient() {
       active: true
     };
 
-    setStore({
+    const nextStore = {
       ...store,
       products: store.products.map((product) =>
         product.id === editingProductId ? nextProduct : product
       )
-    });
+    };
+    setStore(nextStore);
     setSelectedCategory(nextProduct.categoryId);
     setEditingProductId("");
     setEditingProduct(null);
+    await saveStore(nextStore, `${nextProduct.name} updated and saved.`);
   }
 
   async function uploadSettingImage(
@@ -590,10 +772,31 @@ export default function AdminClient() {
                   <span>Product Name</span>
                   <input name="name" placeholder="Butter Naan" required />
                 </label>
-                <label>
-                  <span>Price</span>
-                  <input name="price" type="number" step="0.01" placeholder="5.60" required />
+                <label className="admin-check full-field">
+                  <input
+                    type="checkbox"
+                    checked={newHalfFullEnabled}
+                    onChange={(event) => setNewHalfFullEnabled(event.target.checked)}
+                  />
+                  <span>Enable separate Half and Full prices</span>
                 </label>
+                {newHalfFullEnabled ? (
+                  <>
+                    <label>
+                      <span>Half Price</span>
+                      <input name="halfPrice" type="number" min="0" step="0.01" placeholder="12.00" required />
+                    </label>
+                    <label>
+                      <span>Full Price</span>
+                      <input name="fullPrice" type="number" min="0" step="0.01" placeholder="20.00" required />
+                    </label>
+                  </>
+                ) : (
+                  <label>
+                    <span>Price</span>
+                    <input name="price" type="number" min="0" step="0.01" placeholder="5.60" required />
+                  </label>
+                )}
                 <label>
                   <span>Image Upload</span>
                   <input name="image" type="file" accept="image/*" />
@@ -606,11 +809,13 @@ export default function AdminClient() {
                   <span>Description</span>
                   <textarea name="description" rows={3} placeholder="Product description" />
                 </label>
-                <label className="full-field">
-                  <span>Size Options</span>
-                  <input name="sizeOptions" placeholder="Small:0, Large:2.80" />
-                  <small>Example: Small:0, Large:2.80 means Large adds $2.80.</small>
-                </label>
+                {!newHalfFullEnabled ? (
+                  <label className="full-field">
+                    <span>Other Size Options</span>
+                    <input name="sizeOptions" placeholder="Small:0, Large:2.80" />
+                    <small>Example: Small:0, Large:2.80 means Large adds $2.80.</small>
+                  </label>
+                ) : null}
                 <label className="full-field">
                   <span>Spice Options</span>
                   <input name="spiceOptions" placeholder="Sweet, Mild, Medium, Hot, Extra Hot" />
@@ -660,16 +865,54 @@ export default function AdminClient() {
                       required
                     />
                   </label>
-                  <label>
-                    <span>Price</span>
+                  <label className="admin-check full-field">
                     <input
-                      type="number"
-                      step="0.01"
-                      value={editingProduct.price}
-                      onChange={(event) => updateEditingProduct({ price: event.target.value })}
-                      required
+                      type="checkbox"
+                      checked={editingProduct.halfFullEnabled}
+                      onChange={(event) =>
+                        updateEditingProduct({ halfFullEnabled: event.target.checked })
+                      }
                     />
+                    <span>Enable separate Half and Full prices</span>
                   </label>
+                  {editingProduct.halfFullEnabled ? (
+                    <>
+                      <label>
+                        <span>Half Price</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={editingProduct.halfPrice}
+                          onChange={(event) => updateEditingProduct({ halfPrice: event.target.value })}
+                          required
+                        />
+                      </label>
+                      <label>
+                        <span>Full Price</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={editingProduct.fullPrice}
+                          onChange={(event) => updateEditingProduct({ fullPrice: event.target.value })}
+                          required
+                        />
+                      </label>
+                    </>
+                  ) : (
+                    <label>
+                      <span>Price</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editingProduct.price}
+                        onChange={(event) => updateEditingProduct({ price: event.target.value })}
+                        required
+                      />
+                    </label>
+                  )}
                   <label>
                     <span>Replace Image</span>
                     <input name="image" type="file" accept="image/*" />
@@ -689,14 +932,16 @@ export default function AdminClient() {
                       onChange={(event) => updateEditingProduct({ description: event.target.value })}
                     />
                   </label>
-                  <label className="full-field">
-                    <span>Size Options</span>
-                    <input
-                      value={editingProduct.sizeOptions}
-                      onChange={(event) => updateEditingProduct({ sizeOptions: event.target.value })}
-                    />
-                    <small>Example: Small:0, Large:2.80 means Large adds $2.80.</small>
-                  </label>
+                  {!editingProduct.halfFullEnabled ? (
+                    <label className="full-field">
+                      <span>Other Size Options</span>
+                      <input
+                        value={editingProduct.sizeOptions}
+                        onChange={(event) => updateEditingProduct({ sizeOptions: event.target.value })}
+                      />
+                      <small>Example: Small:0, Large:2.80 means Large adds $2.80.</small>
+                    </label>
+                  ) : null}
                   <label className="full-field">
                     <span>Spice Options</span>
                     <input
@@ -730,8 +975,10 @@ export default function AdminClient() {
                       <h3>{product.name}</h3>
                       <p>{product.description}</p>
                       <small>
-                        {money(product.price)}
-                        {product.sizeOptions.length
+                        {halfFullPrices(product)
+                          ? `Half: ${money(halfFullPrices(product)!.half)} | Full: ${money(halfFullPrices(product)!.full)}`
+                          : money(product.price)}
+                        {product.sizeOptions.length && !halfFullPrices(product)
                           ? ` | Sizes: ${sizeOptionsToText(product.sizeOptions)}`
                           : ""}
                         {product.spiceOptions.length
@@ -930,7 +1177,7 @@ function OrdersPanel({ orders, compact = false }: { orders: AdminOrder[]; compac
                 <tr key={order.id}>
                   <td>
                     <strong>{order.id.slice(0, 8)}</strong>
-                    <small>{new Date(order.createdAt).toLocaleString()}</small>
+                    <small>{formatNewZealandDate(order.createdAt)}</small>
                   </td>
                   <td>
                     <strong>{order.details.name}</strong>
@@ -1003,7 +1250,7 @@ function OrderDetailsModal({ order, onClose }: { order: AdminOrder; onClose: () 
           <div>
             <span>Status</span>
             <strong>{order.status}</strong>
-            <small>{new Date(order.createdAt).toLocaleString()}</small>
+            <small>{formatNewZealandDate(order.createdAt)}</small>
           </div>
         </div>
 

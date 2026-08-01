@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import "./globals.css";
 import "./commerce.css";
+import "sweetalert2/dist/sweetalert2.min.css";
 
 export async function generateMetadata(): Promise<Metadata> {
   const headerList = await headers();
