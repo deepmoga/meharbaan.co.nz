@@ -1,5 +1,7 @@
 "use client";
 
+import "./admin.css";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Swal, { type SweetAlertIcon } from "sweetalert2";
 import {
@@ -557,12 +559,12 @@ export default function AdminClient() {
   }
 
   if (authenticated === null) {
-    return <main className="admin-login-page">Loading admin...</main>;
+    return <main className="admin-app admin-login-page">Loading admin...</main>;
   }
 
   if (!authenticated) {
     return (
-      <main className="admin-login-page">
+      <main className="admin-app admin-login-page">
         <form className="admin-login-card" onSubmit={login} autoComplete="off">
           <img src="/meharbaan-logo.png" alt="Meharbaan Indian Cuisine" />
           <h1>Admin Login</h1>
@@ -585,7 +587,7 @@ export default function AdminClient() {
   }
 
   if (!store || !settings) {
-    return <main className="admin-login-page">Loading dashboard...</main>;
+    return <main className="admin-app admin-login-page">Loading dashboard...</main>;
   }
 
   return (
