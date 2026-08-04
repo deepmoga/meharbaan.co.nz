@@ -12,7 +12,14 @@ import {
   Settings,
   ShoppingBag,
   Tags,
-  Truck
+  Truck,
+  Lock,
+  Mail,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  ArrowRight,
+  Loader2
 } from "lucide-react";
 import type { MenuProduct, MenuStore, SizeOption } from "@/lib/menu-types";
 import type { SiteSettings } from "@/lib/site-settings";
@@ -175,6 +182,7 @@ function productToFormState(product: MenuProduct): ProductFormState {
 export default function AdminClient() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [loginStatus, setLoginStatus] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [section, setSection] = useState<AdminSection>("dashboard");
   const [store, setStore] = useState<MenuStore | null>(null);
   const [settings, setSettings] = useState<SiteSettings | null>(null);
@@ -559,29 +567,109 @@ export default function AdminClient() {
   }
 
   if (authenticated === null) {
-    return <main className="admin-app admin-login-page">Loading admin...</main>;
+    return (
+      <main className="admin-login-page">
+        <div className="admin-login-wrapper">
+          <div className="admin-login-card admin-login-loading">
+            <Loader2 className="admin-btn-spinner" size={32} />
+            <p>Loading Admin Portal...</p>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   if (!authenticated) {
     return (
-      <main className="admin-app admin-login-page">
-        <form className="admin-login-card" onSubmit={login} autoComplete="off">
-          <img src="/meharbaan-logo.png" alt="Meharbaan Indian Cuisine" />
-          <h1>Admin Login</h1>
-          <p>Sign in to manage menu, orders and website settings.</p>
-          <label>
-            <span>Email</span>
-            <input name="email" type="email" placeholder="admin@meharbaan.co.nz" required autoComplete="off" />
-          </label>
-          <label>
-            <span>Password</span>
-            <input name="password" type="password" placeholder="Password" required autoComplete="new-password" />
-          </label>
-          <button className="button button-green" type="submit">
-            Sign In
-          </button>
-          {loginStatus ? <strong>{loginStatus}</strong> : null}
-        </form>
+      <main className="admin-login-page">
+        <div className="admin-login-bg-glow admin-login-glow-1"></div>
+        <div className="admin-login-bg-glow admin-login-glow-2"></div>
+        
+        <div className="admin-login-wrapper">
+          <form className="admin-login-card" onSubmit={login} autoComplete="off">
+            <div className="admin-login-header">
+              <div className="admin-logo-badge">
+                <img src="/meharbaan-logo.png" alt="Meharbaan Indian Cuisine" />
+              </div>
+              <div className="admin-title-group">
+                <span className="admin-login-portal-badge">
+                  <ShieldCheck size={14} /> Admin Portal
+                </span>
+                <h1>Welcome Back</h1>
+                <p>Sign in to manage menu, orders & website settings.</p>
+              </div>
+            </div>
+
+            {loginStatus && loginStatus !== "Signing in..." ? (
+              <div className="admin-login-alert">
+                <span>{loginStatus}</span>
+              </div>
+            ) : null}
+
+            <div className="admin-login-fields">
+              <div className="admin-field-group">
+                <label htmlFor="admin-email-input">Email Address</label>
+                <div className="admin-input-wrapper">
+                  <Mail className="admin-input-icon" size={18} />
+                  <input
+                    id="admin-email-input"
+                    name="email"
+                    type="email"
+                    placeholder="admin@meharbaan.co.nz"
+                    required
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+
+              <div className="admin-field-group">
+                <label htmlFor="admin-password-input">Password</label>
+                <div className="admin-input-wrapper">
+                  <Lock className="admin-input-icon" size={18} />
+                  <input
+                    id="admin-password-input"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••••••"
+                    required
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    className="admin-password-toggle"
+                    onClick={() => setShowPassword(!showPassword)}
+                    tabIndex={-1}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <button
+              className="admin-login-submit-btn"
+              type="submit"
+              disabled={loginStatus === "Signing in..."}
+            >
+              {loginStatus === "Signing in..." ? (
+                <>
+                  <Loader2 className="admin-btn-spinner" size={18} />
+                  <span>Authenticating...</span>
+                </>
+              ) : (
+                <>
+                  <span>Sign In to Dashboard</span>
+                  <ArrowRight size={18} />
+                </>
+              )}
+            </button>
+
+            <div className="admin-login-footer">
+              <p>Protected Management Portal • Meharbaan Indian Cuisine</p>
+            </div>
+          </form>
+        </div>
       </main>
     );
   }
