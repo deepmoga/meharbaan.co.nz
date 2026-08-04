@@ -1,5 +1,7 @@
 "use client";
 
+import "./admin.css";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Swal, { type SweetAlertIcon } from "sweetalert2";
 import {
@@ -563,22 +565,21 @@ export default function AdminClient() {
   if (!authenticated) {
     return (
       <main className="admin-login-page">
-        <form className="admin-login-card" onSubmit={login}>
+        <form className="admin-login-card" onSubmit={login} autoComplete="off">
           <img src="/meharbaan-logo.png" alt="Meharbaan Indian Cuisine" />
           <h1>Admin Login</h1>
           <p>Sign in to manage menu, orders and website settings.</p>
           <label>
             <span>Email</span>
-            <input name="email" type="email" defaultValue="rana33994@gmail.com" required />
+            <input name="email" type="email" placeholder="admin@meharbaan.co.nz" required autoComplete="off" />
           </label>
           <label>
             <span>Password</span>
-            <input name="password" type="password" placeholder="Password" required />
+            <input name="password" type="password" placeholder="Password" required autoComplete="new-password" />
           </label>
           <button className="button button-green" type="submit">
             Sign In
           </button>
-          <small>Default password: Meharbaan@2026</small>
           {loginStatus ? <strong>{loginStatus}</strong> : null}
         </form>
       </main>
