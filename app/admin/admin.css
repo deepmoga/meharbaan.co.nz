@@ -1,4 +1,5 @@
-.admin-app {
+.admin-app,
+.admin-login-page {
   --green: #0e153b;
   --green-dark: #080d29;
   --green-soft: #eef0f8;
@@ -13,15 +14,19 @@
 }
 
 .admin-app,
-.admin-app * {
+.admin-app *,
+.admin-login-page,
+.admin-login-page * {
   box-sizing: border-box;
 }
 
-.admin-app {
+.admin-app,
+.admin-login-page {
   scroll-behavior: smooth;
 }
 
-.admin-app {
+.admin-app,
+.admin-login-page {
   margin: 0;
   background: var(--paper);
   color: var(--ink);

@@ -1,7 +1,5 @@
 "use client";
 
-import "./admin.css";
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Swal, { type SweetAlertIcon } from "sweetalert2";
 import {
