@@ -3,7 +3,7 @@ const { Client } = require('ssh2');
 const conn = new Client();
 conn.on('ready', () => {
   console.log('Client :: ready');
-  const cmd = `su - meharbaan -c "cd /home/meharbaan/public_html && git fetch origin && git checkout main && git reset --hard origin/main && npm install && npm run build"`;
+  const cmd = `su - meharbaan -c "cd /home/meharbaan/app && git fetch origin && git checkout main && git reset --hard origin/main && npm install && npm run build && cd /home/meharbaan/public_html && git fetch origin && git checkout main && git reset --hard origin/main && npm install && npm run build"`;
   console.log('Executing:', cmd);
   conn.exec(cmd, (err, stream) => {
     if (err) throw err;
